@@ -367,7 +367,9 @@ class API extends ApiBase {
 					}
 				}
 
-				$parser = MediaWikiServices::getInstance()->getParserFactory()->create();
+				// 修正：使用 MediaWikiServices 获取 Parser
+				$services = MediaWikiServices::getInstance();
+				$parser = $services->getParserFactory()->create();
 
 				// Set options for parsing
 				$opt = new ParserOptions($this->getUser());
@@ -378,10 +380,6 @@ class API extends ApiBase {
 
 				// Get all mentioned user
 				$mentioned = Helper::generateMentionedList($output, $postObject);
-
-				unset($parser);
-				unset($opt);
-				unset($output);
 
 				// Useless p wrapper
 				$text = self::stripWrapper($text);
@@ -395,7 +393,7 @@ class API extends ApiBase {
 				$postObject->text = $text;
 				$postObject->post();
 
-				$hookContainer = MediaWikiServices::getInstance()->getHookContainer();
+				$hookContainer = $services->getHookContainer();
 				if (!$filterResult['good']) {
 					global $wgTriggerFlowThreadHooks;
 					if ($wgTriggerFlowThreadHooks) {
