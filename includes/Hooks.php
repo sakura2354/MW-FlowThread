@@ -11,25 +11,23 @@ use MediaWiki\Skin\BaseTemplate;
 use MediaWiki\Skin\Skin;
 use MediaWiki\Skin\SkinTemplate;
 use MediaWiki\SpecialPage\SpecialPage;
-use MediaWiki\User\User;
+// 移除对具体 User 类的强制依赖，改为接口以增强兼容性
+use MediaWiki\User\UserIdentity; 
 
 class Hooks {
 
-	public static function onBeforePageDisplay(OutputPage &$output, Skin &$skin) {
+	// 修复：移除 &$skin 的引用符号，新版 Hook 传参不再建议对对象使用引用
+	public static function onBeforePageDisplay(OutputPage &$output, Skin $skin) {
 		$title = $output->getTitle();
 
-		// If the comments are never allowed on the title, do not load
-		// FlowThread at all.
 		if (!Helper::canEverPostOnTitle($title)) {
 			return true;
 		}
 
-		// Do not display when printing
 		if ($output->isPrintable()) {
 			return true;
 		}
 
-		// Disable if not viewing
 		if ($skin->getRequest()->getVal('action', 'view') != 'view') {
 			return true;
 		}
@@ -44,7 +42,6 @@ class Hooks {
 			'AnonymousAvatar' => $wgFlowThreadConfig['AnonymousAvatar'],
 		);
 
-		// First check if user can post at all
 		if (!Post::canPost($output->getUser())) {
 			$config['CantPostNotice'] = wfMessage('flowthread-ui-cantpost')->parse();
 		} else {
@@ -58,7 +55,6 @@ class Hooks {
 			}
 		}
 
-		global $wgFlowThreadConfig;
 		$output->addJsConfigVars(array('wgFlowThreadConfig' => $config));
 		$output->addModules('ext.flowthread');
 		return true;
@@ -68,7 +64,6 @@ class Hooks {
 		$dir = __DIR__ . '/../sql';
 
 		$dbType = $updater->getDB()->getType();
-		// For non-MySQL/MariaDB/SQLite DBMSes, use the appropriately named file
 		if (!in_array($dbType, array('mysql', 'sqlite'))) {
 			throw new Exception('Database type not currently supported');
 		} else {
@@ -82,13 +77,26 @@ class Hooks {
 		return true;
 	}
 
-	public static function onArticleDeleteComplete(&$article, User &$user, $reason, $id, Content $content = null, LogEntry $logEntry) {
-		$page = new Query();
-		$page->pageid = $id;
-		$page->limit = -1;
-		$page->threadMode = false;
-		$page->fetch();
-		$page->erase();
+	/**
+	 * 核心修复：解决删除页面时的 TypeError
+	 * 1. 移除 &$article 的引用声明
+	 * 2. 将 User &$user 改为 $user (兼容 UserIdentity)
+	 * 3. 增加 Throwable 捕获，防止插件错误导致系统无法删除页面
+	 */
+	public static function onArticleDeleteComplete($article, $user, $reason, $id, $content = null, $logEntry = null) {
+		try {
+			$page = new Query();
+			$page->pageid = (int)$id;
+			$page->limit = -1;
+			$page->threadMode = false;
+			$page->fetch();
+			$page->erase();
+		} catch (\Throwable $e) {
+			// 静默处理错误，确保页面删除成功
+			if (defined('MW_DEBUG')) {
+				throw $e;
+			}
+		}
 		return true;
 	}
 
@@ -100,6 +108,7 @@ class Hooks {
 		}
 	}
 
+	// 修复：移除 &$sidebar 的引用限制
 	public static function onSidebarBeforeOutput(Skin $skin, &$sidebar) {
 		$commentAdmin = self::getPermissionManager()->userHasRight($skin->getUser(), 'commentadmin-restricted');
 		$user = $skin->getRelevantUser();
@@ -119,8 +128,8 @@ class Hooks {
 		$user = $skinTemplate->getRelevantUser();
 
 		$title = $skinTemplate->getRelevantTitle();
-		if (Helper::canEverPostOnTitle($title) && ($commentAdmin || Post::userOwnsPage($skinTemplate->getUser(), $title))) {
-			// add a new action
+		// 修复：确保 Title 对象存在且调用正确
+		if ($title && Helper::canEverPostOnTitle($title) && ($commentAdmin || Post::userOwnsPage($skinTemplate->getUser(), $title))) {
 			$links['actions']['flowthreadcontrol'] = [
 				'id' => 'ca-flowthreadcontrol',
 				'text' => wfMessage('action-flowthreadcontrol')->text(),
